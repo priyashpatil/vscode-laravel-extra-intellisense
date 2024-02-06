@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
-import { resolve } from 'path';
+import { resolve, join } from 'path';
 
 export default class Helpers {
 
@@ -35,44 +35,60 @@ export default class Helpers {
 							   'withAggregate', 'withCount', 'withMax', 'withMin', 'withSum', 'withAvg'];
 
 	/**
-	 * Create full path from project file name
-	 *
-	 * @param path
-	 * @param forCode
-	 * @param string
-	 */
-	static projectPath(path:string, forCode: boolean = false) : string {
-		if (path[0] !== '/') {
-			path = '/' + path;
+     * Create a full path from a project-relative path, considering settings for code and general use.
+     * @param path The relative path within the project to resolve.
+     * @param forCode Indicates whether the path is used for code purposes, affecting which basePath setting is used.
+     * @returns The resolved full path as a string.
+     */
+	static projectPath(path: string, forCode: boolean = false): string {
+		// Determine the appropriate base path setting based on the context (code or general).
+		const configKey = forCode ? 'basePathForCode' : 'basePath';
+		const basePathSetting = vscode.workspace.getConfiguration("LaravelExtraIntellisense").get<string>(configKey);
+
+		if (basePathSetting) {
+			const resolvedBasePath = this.resolveBasePath(basePathSetting);
+			// Use path.join to automatically handle different OS path delimiters and avoid manual string concatenation.
+			return join(resolvedBasePath, path);
 		}
 
-		let basePath = vscode.workspace.getConfiguration("LaravelExtraIntellisense").get<string>('basePath');
-		if (forCode === false && basePath && basePath.length > 0) {
-			if (basePath.startsWith('.') && vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-				basePath = resolve(vscode.workspace.workspaceFolders[0].uri.fsPath, basePath);
-			}
-			basePath = basePath.replace(/[\/\\]$/, "");
-			return basePath + path;
-		}
+		// Fallback to searching for the artisan file in workspace folders to determine the Laravel project root.
+		return this.findArtisanPath(path);
+	}
 
-		let basePathForCode = vscode.workspace.getConfiguration("LaravelExtraIntellisense").get<string>('basePathForCode');
-		if (forCode && basePathForCode && basePathForCode.length > 0) {
-			if (basePathForCode.startsWith('.') && vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-				basePathForCode = resolve(vscode.workspace.workspaceFolders[0].uri.fsPath, basePathForCode);
-			}
-			basePathForCode = basePathForCode.replace(/[\/\\]$/, "");
-			return basePathForCode + path;
-		}
+	/**
+     * Resolves the base path from the configuration, accounting for relative paths.
+     * @param basePathSetting The base path setting from the configuration.
+     * @returns The resolved base path as an absolute path.
+     */
+    private static resolveBasePath(basePathSetting: string): string {
+        if (basePathSetting.startsWith('.')) {
+            // Assume the first workspace folder if available; this might need refinement for multi-root workspaces.
+            const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+            if (workspaceFolder) {
+                return resolve(workspaceFolder, basePathSetting);
+            }
+        }
+        // For absolute paths or non-relative settings, return as is.
+        return basePathSetting;
+    }
 
-		if (vscode.workspace.workspaceFolders instanceof Array && vscode.workspace.workspaceFolders.length > 0) {
+	/**
+     * Searches workspace folders for the Laravel artisan file and returns the path concatenated with the given path.
+     * @param path The relative path to append to the found artisan base path.
+     * @returns The full path based on the artisan file's location, or an empty string if not found.
+     */
+	private static findArtisanPath(path: string): string {
+		if (vscode.workspace.workspaceFolders) {
 			for (let workspaceFolder of vscode.workspace.workspaceFolders) {
-				if (fs.existsSync(workspaceFolder.uri.fsPath + "/artisan")) {
-					return workspaceFolder.uri.fsPath + path;
+				const artisanPath = join(workspaceFolder.uri.fsPath, 'artisan');
+				if (fs.existsSync(artisanPath)) {
+					return join(workspaceFolder.uri.fsPath, path);
 				}
 			}
 		}
 		return "";
 	}
+
 
 	static arrayUnique(value:any, index:any, self:Array<any>) {
 		return self.indexOf(value) === index;
